@@ -1,4 +1,6 @@
 /checkpoints
 /results
 __pycache__
-*.pyc 
+*.pyc
+/vgg-pretrained
+/datasets/shoes
