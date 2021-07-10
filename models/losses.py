@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 import numpy as np
-from .cyclegan_networks import init_net
-from .spatial_patch_loss import PatchSim, SpatialCorrelativeLoss
+from .spatial_patch_loss import SpatialCorrelativeLoss
 
 class GANLoss(nn.Module):
     """Define different GAN objectives.

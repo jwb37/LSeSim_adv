@@ -3,7 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 import numpy as np
+
 from .init_net import init_net
+from spatial_transformation_layer import SpatialTransformationLayer
 
 
 class PatchSim(nn.Module):
@@ -67,15 +69,15 @@ class SpatialCorrelativeLoss(nn.Module):
     """
     learnable patch-based spatially-correlative loss with contrastive learning
     """
-    def __init__(self, loss_mode='cos', patch_nums=256, patch_size=32, norm=True, use_conv=True,
+    def __init__(self, loss_mode='cos', patch_nums=256, patch_size=32, norm=True, use_attn=True, attn_type='conv',
                  init_type='normal', init_gain=0.02, gpu_ids=[], T=0.1):
         super(SpatialCorrelativeLoss, self).__init__()
         self.patch_sim = PatchSim(patch_nums=patch_nums, patch_size=patch_size, norm=norm)
         self.patch_size = patch_size
         self.patch_nums = patch_nums
         self.norm = norm
-        self.use_conv = use_conv
-        self.conv_init = False
+        self.use_attn = use_attn
+        self.attn_type = attn_type
         self.init_type = init_type
         self.init_gain = init_gain
         self.gpu_ids = gpu_ids
@@ -84,24 +86,29 @@ class SpatialCorrelativeLoss(nn.Module):
         self.criterion = nn.L1Loss() if norm else nn.SmoothL1Loss()
         self.cross_entropy_loss = nn.CrossEntropyLoss()
 
-    def update_init_(self):
-        self.conv_init = True
-
-    def create_conv(self, feat, layer):
+    def create_attn(self, feat, layer):
         """
-        create the 1*1 conv filter to select the features for a specific task
+        create the attention mapping layer used to transform features before building similarity maps
         :param feat: extracted features from a pretrained VGG or encoder for the similarity and dissimilarity map
         :param layer: different layers use different filter
         :return:
         """
-        input_nc = feat.size(1)
-        output_nc = max(32, input_nc // 4)
-        conv = nn.Sequential(*[nn.Conv2d(input_nc, output_nc, kernel_size=1),
-                               nn.ReLU(),
-                               nn.Conv2d(output_nc, output_nc, kernel_size=1)])
-        conv.to(feat.device)
-        setattr(self, 'conv_%d' % layer, conv)
-        init_net(conv, self.init_type, self.init_gain, self.gpu_ids)
+        attn_layers = []
+        if self.attn_type.lower() in ['conv', 'both']:
+            attn_layers.append( ConvAttentionLayer() )
+        if self.attn_type.lower() in ['spatialtransform', 'both']:
+            attn_layers.append( SpatialTransformationLayer() )
+
+        if not attn_layers:
+            raise ValueError("Command line option attn_type given as '%s'. It must be one of: conv, both, spatialtransform" % self.loss_mode)
+
+        for l in attn_layers:
+            l.build_net(feat)
+            feat = l(feat)
+
+        attn_net = nn.Sequential(*attn_layers)
+        setattr(self, 'attn_%d' % layer, attn_net)
+        init_net(attn_net, self.init_type, self.init_gain, self.gpu_ids)
 
     def cal_sim(self, f_src, f_tgt, f_other=None, layer=0, patch_ids=None):
         """
@@ -111,12 +118,12 @@ class SpatialCorrelativeLoss(nn.Module):
         :param f_other: feature map from other image (only used for contrastive learning for spatial network)
         :return:
         """
-        if self.use_conv:
-            if not self.conv_init:
-                self.create_conv(f_src, layer)
-            conv = getattr(self, 'conv_%d' % layer)
-            f_src, f_tgt = conv(f_src), conv(f_tgt)
-            f_other = conv(f_other) if f_other is not None else None
+        if self.use_attn:
+            if not hasattr(self, 'attn_%d' % layer):
+                self.create_attn(f_src, layer)
+            attn = getattr(self, 'attn_%d' % layer)
+            f_src, f_tgt = attn(f_src), attn(f_tgt)
+            f_other = attn(f_other) if f_other is not None else None
         sim_src, patch_ids = self.patch_sim(f_src, patch_ids)
         sim_tgt, patch_ids = self.patch_sim(f_tgt, patch_ids)
         if f_other is not None:
@@ -171,4 +178,22 @@ class SpatialCorrelativeLoss(nn.Module):
         sim_src, sim_tgt, sim_other = self.cal_sim(f_src, f_tgt, f_other, layer)
         # calculate the spatial similarity for source and target domain
         loss = self.compare_sim(sim_src, sim_tgt, sim_other)
-        return loss 
+        return loss
+
+
+class ConvAttentionLayer(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def build_net(self, feat):
+        input_nc = feat.size(1)
+        output_nc = max(32, input_nc // 4)
+        self.net = nn.Sequential(
+            nn.Conv2d(input_nc, output_nc, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv2d(output_nc, output_nc, kernel_size=1)
+        )
+        self.net.to(feat.device)
+
+    def forward(self, x):
+        return self.net(x)

@@ -25,6 +25,7 @@ class SCModel(BaseModel):
         parser.add_argument('--loss_mode', type=str, default='cos', help='which loss type is used, cos | l1 | info')
         parser.add_argument('--use_norm', action='store_true', help='normalize the feature map for FLSeSim')
         parser.add_argument('--learned_attn', action='store_true', help='use the learnable attention map')
+        parser.add_argument('--attn_type', type=str, default='conv', help='type of attention mapping [conv | spatialtransform | both]')
         parser.add_argument('--augment', action='store_true', help='use data augmentation for contrastive learning')
         parser.add_argument('--T', type=float, default=0.07, help='temperature for similarity')
         parser.add_argument('--lambda_spatial', type=float, default=10.0, help='weight for spatially-correlative loss')
@@ -81,7 +82,7 @@ class SCModel(BaseModel):
             self.criterionStyle = losses.StyleLoss().to(self.device)
             self.criterionFeature = losses.PerceptualLoss().to(self.device)
             self.criterionSpatial = losses.SpatialCorrelativeLoss(opt.loss_mode, opt.patch_nums, opt.patch_size, opt.use_norm,
-                                    opt.learned_attn, gpu_ids=self.gpu_ids, T=opt.T).to(self.device)
+                                    use_attn = opt.learned_attn, gpu_ids=self.gpu_ids, T=opt.T).to(self.device)
             self.normalization = losses.Normalization(self.device)
             # define the contrastive loss
             if opt.learned_attn:
@@ -245,8 +246,5 @@ class SCModel(BaseModel):
         for i, (feat_src, feat_tgt, feat_oth) in enumerate(zip(feats_src, feats_tgt, feats_oth)):
             loss = self.criterionSpatial.loss(feat_src, feat_tgt, feat_oth, i)
             total_loss += loss.mean()
-
-        if not self.criterionSpatial.conv_init:
-            self.criterionSpatial.update_init_()
 
         return total_loss / n_layers
