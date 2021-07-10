@@ -1,5 +1,6 @@
 from torch.optim import lr_scheduler
 from . import cyclegan_networks, stylegan_networks
+from .init_net import init_net
 
 
 ##################################################################################
@@ -31,7 +32,7 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = stylegan_networks.StyleGAN2Generator(input_nc, output_nc, ngf, opt=opt)
     else:
         raise NotImplementedError('Generator model name [%s] is not recognized' % netG)
-    return cyclegan_networks.init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netG))
+    return init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netG))
 
 
 def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, no_antialias=False, gpu_ids=[], opt=None):
@@ -58,7 +59,7 @@ def define_D(input_nc, ndf, netD, n_layers_D=3, norm='batch', init_type='normal'
         net = stylegan_networks.StyleGAN2Discriminator(input_nc, ndf, opt=opt)
     else:
         raise NotImplementedError('Discriminator model name [%s] is not recognized' % netD)
-    return cyclegan_networks.init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netD))
+    return init_net(net, init_type, init_gain, gpu_ids, initialize_weights=('stylegan2' not in netD))
 
 
 ###############################################################################

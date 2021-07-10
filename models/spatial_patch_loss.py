@@ -5,7 +5,7 @@ import torchvision.models as models
 import numpy as np
 
 from .init_net import init_net
-from spatial_transformation_layer import SpatialTransformationLayer
+from .spatial_transformation_layer import SpatialTransformationLayer
 
 
 class PatchSim(nn.Module):
@@ -94,9 +94,9 @@ class SpatialCorrelativeLoss(nn.Module):
         :return:
         """
         attn_layers = []
-        if self.attn_type.lower() in ['conv', 'both']:
+        if self.attn_type.lower() == 'conv' or self.attn_type.lower() == 'both':
             attn_layers.append( ConvAttentionLayer() )
-        if self.attn_type.lower() in ['spatialtransform', 'both']:
+        if self.attn_type.lower() == 'spatialtransform' or self.attn_type.lower() == 'both':
             attn_layers.append( SpatialTransformationLayer() )
 
         if not attn_layers:
@@ -105,10 +105,10 @@ class SpatialCorrelativeLoss(nn.Module):
         for l in attn_layers:
             l.build_net(feat)
             feat = l(feat)
+            l.init_params(self.init_type, self.init_gain, self.gpu_ids)
 
         attn_net = nn.Sequential(*attn_layers)
         setattr(self, 'attn_%d' % layer, attn_net)
-        init_net(attn_net, self.init_type, self.init_gain, self.gpu_ids)
 
     def cal_sim(self, f_src, f_tgt, f_other=None, layer=0, patch_ids=None):
         """
@@ -194,6 +194,9 @@ class ConvAttentionLayer(nn.Module):
             nn.Conv2d(output_nc, output_nc, kernel_size=1)
         )
         self.net.to(feat.device)
+
+    def init_params(self, init_type, init_gain, gpu_ids):
+        init_net(self, init_type, init_gain, gpu_ids)
 
     def forward(self, x):
         return self.net(x)

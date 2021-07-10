@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .init_net import init_net
+
 class SpatialTransformationLayer(nn.Module):
-    def __init__(self, in_ch):
+    def __init__(self):
         super().__init__()
 
     def build_net(self, x):
@@ -18,6 +20,7 @@ class SpatialTransformationLayer(nn.Module):
             nn.ReLU()
         )
 
+        loc_conv.to(x.device)
         test_out = loc_conv(x)
 
         loc_fc = nn.Sequential(
@@ -34,7 +37,16 @@ class SpatialTransformationLayer(nn.Module):
 
         self.localization.to(x.device)
 
+    def init_params(self, init_type, init_gain, gpu_ids):
+        init_net(self, init_type, init_gain, gpu_ids)
+
+        # Override initial parameters for final localization layer
+        # Set them to an identity transformation
+        self.localization[-1][-1].weight.data.zero_()
+        self.localization[-1][-1].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+
     def forward(self, x):
         theta = self.localization(x)
+        theta = theta.view(-1,2,3)
         grid = F.affine_grid(theta, x.size())
         return F.grid_sample(x, grid)

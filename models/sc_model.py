@@ -82,7 +82,7 @@ class SCModel(BaseModel):
             self.criterionStyle = losses.StyleLoss().to(self.device)
             self.criterionFeature = losses.PerceptualLoss().to(self.device)
             self.criterionSpatial = losses.SpatialCorrelativeLoss(opt.loss_mode, opt.patch_nums, opt.patch_size, opt.use_norm,
-                                    use_attn = opt.learned_attn, gpu_ids=self.gpu_ids, T=opt.T).to(self.device)
+                                    use_attn = opt.learned_attn, attn_type=opt.attn_type, gpu_ids=self.gpu_ids, T=opt.T).to(self.device)
             self.normalization = losses.Normalization(self.device)
             # define the contrastive loss
             if opt.learned_attn:
