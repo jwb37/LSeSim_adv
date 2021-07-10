@@ -33,6 +33,7 @@ class SCModel(BaseModel):
         parser.add_argument('--lambda_style', type=float, default=0.0, help='weight for style loss')
         parser.add_argument('--lambda_identity', type=float, default=0.0, help='use identity mapping')
         parser.add_argument('--lambda_gradient', type=float, default=0.0, help='weight for the gradient penalty')
+        parser.add_argument('--vggA_weights_file', type=str, default=None, help='pre-trained VGG16 weights file for vggA feature extractor')
 
         return parser
 
@@ -68,8 +69,13 @@ class SCModel(BaseModel):
             if opt.lambda_gradient > 0.0:
                 self.loss_names.append('D_Gradient')
             self.fake_B_pool = ImagePool(opt.pool_size) # create image buffer to store previously generated images
+            
             # define the loss function
-            self.netPre = losses.VGG16().to(self.device)
+            self.vggA = losses.VGG16(savefile=opt.vggA_weights_file).to(self.device)
+            self.vggB = losses.VGG16().to(self.device)
+            self.set_requires_grad(self.vggA, False)
+            self.set_requires_grad(self.vggB, False)
+
             self.criterionGAN = losses.GANLoss(opt.gan_mode).to(self.device)
             self.criterionIdt = torch.nn.L1Loss()
             self.criterionStyle = losses.StyleLoss().to(self.device)
@@ -82,8 +88,7 @@ class SCModel(BaseModel):
                 self.netF = self.criterionSpatial
                 self.model_names.append('F')
                 self.loss_names.append('spatial')
-            else:
-                self.set_requires_grad([self.netPre], False)
+
             # initialize optimizers
             self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG.parameters()), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD.parameters()), lr=opt.lr, betas=(opt.beta1, opt.beta2))
@@ -106,9 +111,8 @@ class SCModel(BaseModel):
             self.backward_G()
             self.optimizer_G.zero_grad()
             if self.opt.learned_attn:
-                self.optimizer_F = torch.optim.Adam([{'params': list(filter(lambda p:p.requires_grad, self.netPre.parameters())), 'lr': self.opt.lr*0.0},
-                                        {'params': list(filter(lambda p:p.requires_grad, self.netF.parameters()))}],
-                                         lr=self.opt.lr, betas=(self.opt.beta1, self.opt.beta2))
+                self.optimizer_F = torch.optim.Adam(self.netF.parameters(),
+                                        lr=self.opt.lr, betas=(self.opt.beta1, self.opt.beta2))
                 self.optimizers.append(self.optimizer_F)
                 self.optimizer_F.zero_grad()
 
@@ -144,7 +148,7 @@ class SCModel(BaseModel):
             norm_real_A = torch.cat([norm_real_A, norm_real_A], dim=0)
             norm_fake_B = torch.cat([norm_fake_B, norm_aug_A], dim=0)
             norm_real_B = torch.cat([norm_real_B, norm_aug_B], dim=0)
-        self.loss_spatial = self.Spatial_Loss(self.netPre, norm_real_A, norm_fake_B, norm_real_B)
+        self.loss_spatial = self.Spatial_Loss(norm_real_A, norm_fake_B, norm_real_B)
 
         self.loss_spatial.backward()
 
@@ -193,11 +197,11 @@ class SCModel(BaseModel):
         norm_real_B = self.normalization((self.real_B + 1) * 0.5)
         self.loss_style = self.criterionStyle(norm_real_B, norm_fake_B) * l_style if l_style > 0 else 0
         self.loss_per = self.criterionFeature(norm_real_A, norm_fake_B) * l_per if l_per > 0 else 0
-        self.loss_G_s = self.Spatial_Loss(self.netPre, norm_real_A, norm_fake_B, None) * l_sptial if l_sptial > 0 else 0
+        self.loss_G_s = self.Spatial_Loss(norm_real_A, norm_fake_B, None) * l_sptial if l_sptial > 0 else 0
         # identity loss
         if l_spatial_idt > 0:
             norm_fake_idt_B = self.normalization((self.idt_B + 1) * 0.5)
-            self.loss_G_s_idt_B = self.Spatial_Loss(self.netPre, norm_real_B, norm_fake_idt_B, None) * l_spatial_idt
+            self.loss_G_s_idt_B = self.Spatial_Loss(norm_real_B, norm_fake_idt_B, None) * l_spatial_idt
         else:
             self.loss_G_s_idt_B = 0
         self.loss_idt_B = self.criterionIdt(self.real_B, self.idt_B) * l_idt if l_idt > 0 else 0
@@ -210,7 +214,7 @@ class SCModel(BaseModel):
         # forward
         self.forward()
         if self.opt.learned_attn:
-            self.set_requires_grad([self.netF, self.netPre], True)
+            self.set_requires_grad(self.netF, True)
             self.optimizer_F.zero_grad()
             self.backward_F()
             self.optimizer_F.step()
@@ -223,17 +227,17 @@ class SCModel(BaseModel):
         self.set_requires_grad([self.netD], False)
         self.optimizer_G.zero_grad()
         if self.opt.learned_attn:
-            self.set_requires_grad([self.netF, self.netPre], False)
+            self.set_requires_grad(self.netF, False)
         self.backward_G()
         self.optimizer_G.step()
 
-    def Spatial_Loss(self, net, src, tgt, other=None):
+    def Spatial_Loss(self, src, tgt, other=None):
         """given the source and target images to calculate the spatial similarity and dissimilarity loss"""
         n_layers = len(self.attn_layers)
-        feats_src = net(src, self.attn_layers, encode_only=True)
-        feats_tgt = net(tgt, self.attn_layers, encode_only=True)
+        feats_src = self.vggA(src, self.attn_layers, encode_only=True)
+        feats_tgt = self.vggB(tgt, self.attn_layers, encode_only=True)
         if other is not None:
-            feats_oth = net(torch.flip(other, [2, 3]), self.attn_layers, encode_only=True)
+            feats_oth = self.vggB(torch.flip(other, [2, 3]), self.attn_layers, encode_only=True)
         else:
             feats_oth = [None for _ in range(n_layers)]
 

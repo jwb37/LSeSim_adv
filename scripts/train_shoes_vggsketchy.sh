@@ -1,7 +1,7 @@
 set -ex
 python train.py  \
 --continue_train \
---epoch_count 54 \
+--epoch_count 60 \
 --dataroot ./datasets/shoes/ \
 --name shoes2rgb_fse_vggsketchy \
 --save_epoch_freq 2 \

@@ -389,9 +389,16 @@ class Normalization(nn.Module):
 
 
 class VGG16(nn.Module):
-    def __init__(self):
+    def __init__(self, savefile=None):
         super(VGG16, self).__init__()
-        features = models.vgg16(pretrained=True).features
+
+        net = models.vgg16(pretrained=(savefile is None))
+        if savefile is not None:
+            state_dict = torch.load( savefile )
+            net.features.load_state_dict( state_dict )
+
+        features = net.features
+
         self.relu1_1 = torch.nn.Sequential()
         self.relu1_2 = torch.nn.Sequential()
 

@@ -1,9 +1,9 @@
 set -ex
 python train.py  \
 --continue_train \
---epoch_count 54 \
+--epoch_count 30 \
 --dataroot ./datasets/shoes/ \
---name shoes2rgb_fse_vggsketchy \
+--name shoes2rgb_lse \
 --save_epoch_freq 2 \
 --model sc \
 --gpu_ids 0 \
@@ -13,7 +13,6 @@ python train.py  \
 --loss_mode cos \
 --gan_mode lsgan \
 --display_port 8093 \
---vggA_weights_file vgg-pretrained/vgg-sketchy-model.pt \
-#--learned_attn \
-#--augment \
+--learned_attn \
+--augment \
 --patch_size 64
