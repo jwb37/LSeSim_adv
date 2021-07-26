@@ -69,7 +69,7 @@ class SpatialCorrelativeLoss(nn.Module):
     """
     learnable patch-based spatially-correlative loss with contrastive learning
     """
-    def __init__(self, loss_mode='cos', patch_nums=256, patch_size=32, norm=True, use_attn=True, attn_type='conv',
+    def __init__(self, loss_mode='cos', patch_nums=256, patch_size=32, norm=True, use_attn=True, attn_layer_types='c',
                  init_type='normal', init_gain=0.02, gpu_ids=[], T=0.1):
         super(SpatialCorrelativeLoss, self).__init__()
         self.patch_sim = PatchSim(patch_nums=patch_nums, patch_size=patch_size, norm=norm)
@@ -77,7 +77,7 @@ class SpatialCorrelativeLoss(nn.Module):
         self.patch_nums = patch_nums
         self.norm = norm
         self.use_attn = use_attn
-        self.attn_type = attn_type
+        self.attn_layer_types = [t for t in attn_layer_types.split(',')]
         self.init_type = init_type
         self.init_gain = init_gain
         self.gpu_ids = gpu_ids
@@ -94,13 +94,14 @@ class SpatialCorrelativeLoss(nn.Module):
         :return:
         """
         attn_layers = []
-        if self.attn_type.lower() == 'conv' or self.attn_type.lower() == 'both':
-            attn_layers.append( ConvAttentionLayer() )
-        if self.attn_type.lower() == 'spatialtransform' or self.attn_type.lower() == 'both':
-            attn_layers.append( SpatialTransformationLayer() )
+        for layer_code in self.attn_layer_types:
+            if layer_code == 'c':
+                attn_layers.append( ConvAttentionLayer() )
+            elif layer_code == 's':
+                attn_layers.append( SpatialTransformationLayer() )
 
         if not attn_layers:
-            raise ValueError("Command line option attn_type given as '%s'. It must be one of: conv, both, spatialtransform" % self.loss_mode)
+            raise ValueError("Command line option attn_type must be a comma separated list of letters c or s" )
 
         for l in attn_layers:
             l.build_net(feat)

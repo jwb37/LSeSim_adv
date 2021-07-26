@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--dataset-path',
         dest='dataset_path',
-        help='Which folder to process (it should have subfolders testA, testB, trainA and trainB'
+        help='Which folder to process (it should have subfolders testA, testB, trainA and trainB)'
     )
     args = parser.parse_args()
 
