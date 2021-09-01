@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 import numpy as np
-from .spatial_patch_loss import SpatialCorrelativeLoss
+
 
 class GANLoss(nn.Module):
     """Define different GAN objectives.

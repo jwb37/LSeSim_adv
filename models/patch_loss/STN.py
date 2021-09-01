@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .init_net import init_net
+from ..init_net import init_net
 
-class SpatialTransformationLayer(nn.Module):
+class STN(nn.Module):
     def __init__(self):
         super().__init__()
 
