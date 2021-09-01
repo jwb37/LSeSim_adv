@@ -5,6 +5,7 @@ from .base_model import BaseModel
 from . import networks
 from . import losses
 
+from .patch_loss import SpatialCorrelativeLoss
 
 class SCModel(BaseModel):
     """
@@ -23,9 +24,11 @@ class SCModel(BaseModel):
         parser.add_argument('--patch_size', type=int, default=64, help='patch size to calculate the attention')
         parser.add_argument('--loss_mode', type=str, default='cos', help='which loss type is used, cos | l1 | info')
         parser.add_argument('--use_norm', action='store_true', help='normalize the feature map for FLSeSim')
+        parser.add_argument('--train_attn_with_G', action='store_true', help='train the learned attention layers in LSeSim to minimize spatial loss, instead of using triplet loss to enforce geometric consistency')
         parser.add_argument('--learned_attn', action='store_true', help='use the learnable attention map')
+        parser.add_argument('--local_attn', action='store_true', help='apply attention map to individual patches, rather than entire feature maps')
         parser.add_argument('--attn_layers', type=str, default='4, 7', help='compute spatial loss on which layers')
-        parser.add_argument('--attn_layer_types', type=str, default='c', help='comma separated list of attention layer types: c for conv, s for spatial transform')
+        parser.add_argument('--attn_layer_types', type=str, default='c', help='comma separated list of attention layer types: c for conv, s for spatial (affine) transform')
         parser.add_argument('--augment', action='store_true', help='use data augmentation for contrastive learning')
         parser.add_argument('--T', type=float, default=0.07, help='temperature for similarity')
         parser.add_argument('--lambda_spatial', type=float, default=10.0, help='weight for spatially-correlative loss')
@@ -35,6 +38,7 @@ class SCModel(BaseModel):
         parser.add_argument('--lambda_identity', type=float, default=0.0, help='use identity mapping')
         parser.add_argument('--lambda_gradient', type=float, default=0.0, help='weight for the gradient penalty')
         parser.add_argument('--vggA_weights_file', type=str, default=None, help='pre-trained VGG16 weights file for vggA feature extractor')
+        parser.add_argument('--visualize_ssim', action='store_true', help='adds an exemplar ssim patch to the set of visualizations')
 
         return parser
 
@@ -70,7 +74,15 @@ class SCModel(BaseModel):
             if opt.lambda_gradient > 0.0:
                 self.loss_names.append('D_Gradient')
             self.fake_B_pool = ImagePool(opt.pool_size) # create image buffer to store previously generated images
-            
+
+            # Add visualizations for ssims
+            if opt.visualize_ssim:
+                self.visual_names += [
+                    f"ssim_{img}_{layer}"
+                    for img in ('real_A', 'fake_B')
+                    for layer in range(len(self.attn_layers))
+                ]           
+
             # define the loss function
             self.vggA = losses.VGG16(savefile=opt.vggA_weights_file).to(self.device)
             self.vggB = losses.VGG16().to(self.device)
@@ -81,18 +93,23 @@ class SCModel(BaseModel):
             self.criterionIdt = torch.nn.L1Loss()
             self.criterionStyle = losses.StyleLoss().to(self.device)
             self.criterionFeature = losses.PerceptualLoss().to(self.device)
-            self.criterionSpatial = losses.SpatialCorrelativeLoss(opt.loss_mode, opt.patch_nums, opt.patch_size, opt.use_norm,
-                                    use_attn = opt.learned_attn, attn_layer_types=opt.attn_layer_types, gpu_ids=self.gpu_ids, T=opt.T).to(self.device)
+            self.criterionSpatial = SpatialCorrelativeLoss(opt, gpu_ids=self.gpu_ids).to(self.device)
             self.normalization = losses.Normalization(self.device)
             # define the contrastive loss
             if opt.learned_attn:
                 self.netF = self.criterionSpatial
                 self.model_names.append('F')
-                self.loss_names.append('spatial')
+                if not opt.train_attn_with_G:
+                    self.loss_names.append('spatial')
 
             # initialize optimizers
-            self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG.parameters()), lr=opt.lr, betas=(opt.beta1, opt.beta2))
-            self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD.parameters()), lr=opt.lr, betas=(opt.beta1, opt.beta2))
+            if opt.train_attn_with_G:
+                G_params = itertools.chain(self.netG.parameters(), self.netF.parameters())
+            else:
+                G_params = self.netG.parameters()
+
+            self.optimizer_G = torch.optim.Adam(G_params, lr=opt.lr, betas=(opt.beta1, opt.beta2))
+            self.optimizer_D = torch.optim.Adam(self.netD.parameters(), lr=opt.lr, betas=(opt.beta1, opt.beta2))
             self.optimizers.append(self.optimizer_G)
             self.optimizers.append(self.optimizer_D)
 
@@ -198,7 +215,7 @@ class SCModel(BaseModel):
         norm_real_B = self.normalization((self.real_B + 1) * 0.5)
         self.loss_style = self.criterionStyle(norm_real_B, norm_fake_B) * l_style if l_style > 0 else 0
         self.loss_per = self.criterionFeature(norm_real_A, norm_fake_B) * l_per if l_per > 0 else 0
-        self.loss_G_s = self.Spatial_Loss(norm_real_A, norm_fake_B, None) * l_sptial if l_sptial > 0 else 0
+        self.loss_G_s = self.Spatial_Loss(norm_real_A, norm_fake_B, None, visualize=self.opt.visualize_ssim) * l_sptial if l_sptial > 0 else 0
         # identity loss
         if l_spatial_idt > 0:
             norm_fake_idt_B = self.normalization((self.idt_B + 1) * 0.5)
@@ -214,7 +231,7 @@ class SCModel(BaseModel):
         """Calculate losses, gradients, and update network weights"""
         # forward
         self.forward()
-        if self.opt.learned_attn:
+        if self.opt.learned_attn and not self.opt.train_attn_with_G:
             self.set_requires_grad(self.netF, True)
             self.optimizer_F.zero_grad()
             self.backward_F()
@@ -227,12 +244,12 @@ class SCModel(BaseModel):
         # G_A
         self.set_requires_grad([self.netD], False)
         self.optimizer_G.zero_grad()
-        if self.opt.learned_attn:
+        if self.opt.learned_attn and not self.opt.train_attn_with_G:
             self.set_requires_grad(self.netF, False)
         self.backward_G()
         self.optimizer_G.step()
 
-    def Spatial_Loss(self, src, tgt, other=None):
+    def Spatial_Loss(self, src, tgt, other=None, visualize=False):
         """given the source and target images to calculate the spatial similarity and dissimilarity loss"""
         n_layers = len(self.attn_layers)
         feats_src = self.vggA(src, self.attn_layers, encode_only=True)
@@ -244,7 +261,12 @@ class SCModel(BaseModel):
 
         total_loss = 0.0
         for i, (feat_src, feat_tgt, feat_oth) in enumerate(zip(feats_src, feats_tgt, feats_oth)):
-            loss = self.criterionSpatial.loss(feat_src, feat_tgt, feat_oth, i)
+            loss = self.criterionSpatial.loss(feat_src, feat_tgt, feat_oth, i, visualize)
             total_loss += loss.mean()
+
+        if visualize:
+            for layer in range(len(self.attn_layers)):
+                setattr(self, f"ssim_real_A_{layer}", self.criterionSpatial.visuals['src'][layer])
+                setattr(self, f"ssim_fake_B_{layer}", self.criterionSpatial.visuals['tgt'][layer])
 
         return total_loss / n_layers
