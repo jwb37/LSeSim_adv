@@ -1,8 +1,9 @@
 set -ex
 python train.py  \
---dataset_mode shoes \
---dataroot ./datasets/ShoeV2/ \
---name shoes2rgb_lse_attn_sc \
+--continue_train \
+--epoch_count 49 \
+--dataroot ./datasets/shoes/ \
+--name shoes2rgb_lse_sc_noaug \
 --save_epoch_freq 2 \
 --model sc \
 --gpu_ids 0 \
@@ -14,6 +15,4 @@ python train.py  \
 --display_port 8093 \
 --learned_attn \
 --attn_layer_types s,c \
---augment \
---patch_size 64 \
---visualize_ssim
+--patch_size 64

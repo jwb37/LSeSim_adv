@@ -2,7 +2,7 @@ set -ex
 python train.py  \
 --dataset_mode shoes \
 --dataroot ./datasets/ShoeV2/ \
---name shoes2rgb_lse_attn_sc \
+--name shoes2rgb_lse_attn_s \
 --save_epoch_freq 2 \
 --model sc \
 --gpu_ids 0 \
@@ -13,7 +13,7 @@ python train.py  \
 --gan_mode lsgan \
 --display_port 8093 \
 --learned_attn \
---attn_layer_types s,c \
+--attn_layer_types s \
 --augment \
 --patch_size 64 \
 --visualize_ssim

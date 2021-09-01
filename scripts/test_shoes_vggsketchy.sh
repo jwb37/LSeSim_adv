@@ -1,6 +1,7 @@
 set -ex
 python test.py \
---dataroot datasets/shoes \
+--dataset_mode shoes \
+--dataroot ./datasets/ShoeV2/ \
 --name shoes2rgb_fse_vggsketchy \
 --model sc \
 --epoch 60 \
